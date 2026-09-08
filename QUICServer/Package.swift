@@ -4,10 +4,13 @@ let package = Package(
     name: "QUICServer",
     platforms: [.macOS(.v13)],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-nio-quic.git", exact: "0.2.2"),
+        // Vulnerable commit: parent of 66ce86d (fix)
+        // = 0.2.2 without the undersized datagram guard
+        .package(
+            url: "https://github.com/apple/swift-nio-quic.git",
+            revision: "c615d0d6c3306a32615805344809445f5948e5f0"
+        ),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
-        .package(url: "https://github.com/apple/swift-crypto.git", exact: "5.0.0-beta.2"),
-        .package(url: "https://github.com/apple/swift-certificates.git", exact: "1.19.3"),
     ],
     targets: [
         .executableTarget(
